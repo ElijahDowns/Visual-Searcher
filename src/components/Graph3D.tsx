@@ -5,7 +5,7 @@ import SpriteText from 'three-spritetext';
 import { useGraphStore } from '../store/graphStore';
 import { fetchCategoryMembers, fetchArticleLinks, fetchPageSummary } from '../services/wikipedia';
 import type { GraphNode, GraphLink } from '../types/graph';
-import { fibonacciSphere } from '../App';
+import { childDiskPositions, clusterCamera } from '../utils/layout';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FGRef = any;
@@ -32,9 +32,8 @@ function getSphereGeo(radius: number, isGlow: boolean): THREE.SphereGeometry {
   return geoCache.get(key)!;
 }
 
-// Spread radius shrinks with depth so children cluster tighter around their parent
 function spreadForLevel(level: number): number {
-  return Math.max(40, 130 - level * 30);
+  return Math.max(45, 130 - level * 25);
 }
 
 export default function Graph3D() {
@@ -51,46 +50,48 @@ export default function Graph3D() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const graphData = useMemo(() => ({ nodes, links }), [nodes.length, links.length]);
 
-  // Zoom to fit after first render
+  // Zoom to fit seeds once they load
   useEffect(() => {
     if (nodes.length > 0 && !hasZoomed.current) {
-      const timer = setTimeout(() => {
+      const t = setTimeout(() => {
         graphRef.current?.zoomToFit(800, 120);
         hasZoomed.current = true;
       }, 100);
-      return () => clearTimeout(timer);
+      return () => clearTimeout(t);
     }
   }, [nodes.length]);
 
-  // Fly to a search result after it's added
+  // Fly to a search result — position is pinned so we can fly immediately
   useEffect(() => {
     if (!flyToId) return;
-    const timer = setTimeout(() => {
+    const t = setTimeout(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const n = graphRef.current?.graphData()?.nodes?.find((node: any) => node.id === flyToId);
+      const n = graphRef.current?.graphData()?.nodes?.find((nd: any) => nd.id === flyToId);
       setFlyToId(null);
       if (!n) return;
-      const x = n.x ?? 0, y = n.y ?? 0, z = n.z ?? 0;
+      const x = n.fx ?? n.x ?? 0, y = n.fy ?? n.y ?? 0, z = n.fz ?? n.z ?? 0;
       const mag = Math.hypot(x, y, z) || 1;
       graphRef.current?.cameraPosition(
         { x: x * (1 + 160 / mag), y: y * (1 + 160 / mag), z: z * (1 + 160 / mag) },
         { x, y, z },
-        900
+        800
       );
-    }, 200);
-    return () => clearTimeout(timer);
+    }, 80); // short: pinned positions are known immediately
+    return () => clearTimeout(t);
   }, [flyToId, setFlyToId]);
 
   const handleNodeClick = useCallback(async (rawNode: object) => {
     const node = rawNode as NodeObject;
-    const x = node.x ?? 0, y = node.y ?? 0, z = node.z ?? 0;
+    const x = node.fx ?? node.x ?? 0;
+    const y = node.fy ?? node.y ?? 0;
+    const z = node.fz ?? node.z ?? 0;
     const mag = Math.hypot(x, y, z) || 1;
 
-    // Fly close to node
+    // Fly to node
     graphRef.current?.cameraPosition(
       { x: x * (1 + 100 / mag), y: y * (1 + 100 / mag), z: z * (1 + 100 / mag) },
       { x, y, z },
-      700
+      600
     );
 
     setSelectedNode(node);
@@ -112,9 +113,9 @@ export default function Graph3D() {
       }
       if (rawMembers.length === 0) return;
 
-      // Compute pinned positions for children in a sphere around parent
       const spread = spreadForLevel(node.level);
-      const positions = fibonacciSphere(rawMembers.length, spread);
+      // Disk layout: children face outward — always visible from camera
+      const positions = childDiskPositions(rawMembers.length, x, y, z, spread);
 
       const newNodes: GraphNode[] = rawMembers.map((m, i) => ({
         id: m.title,
@@ -123,9 +124,8 @@ export default function Graph3D() {
         level: node.level + 1,
         val: m.ns === 14 ? 3 : 1,
         expanded: false,
-        // Pin children relative to parent position
-        x: x + positions[i].x, y: y + positions[i].y, z: z + positions[i].z,
-        fx: x + positions[i].x, fy: y + positions[i].y, fz: z + positions[i].z,
+        x: positions[i].x, y: positions[i].y, z: positions[i].z,
+        fx: positions[i].x, fy: positions[i].y, fz: positions[i].z,
       }));
 
       const newLinks: GraphLink[] = newNodes.map(n => ({
@@ -135,13 +135,9 @@ export default function Graph3D() {
 
       addNodes(newNodes, newLinks);
 
-      // Pull camera back to show the expanded cluster
-      const pullDist = spread * 3;
-      graphRef.current?.cameraPosition(
-        { x: x * (1 + pullDist / mag), y: y * (1 + pullDist / mag), z: z * (1 + pullDist / mag) },
-        { x, y, z },
-        900
-      );
+      // Move camera to frame the cluster — look at its centroid, not the parent
+      const { pos, lookAt } = clusterCamera(x, y, z, spread, 3.2);
+      graphRef.current?.cameraPosition(pos, lookAt, 900);
     }
   }, [graphRef, setSelectedNode, setSelectedSummary, setSidebarOpen, markExpanded, addNodes]);
 
@@ -155,7 +151,6 @@ export default function Graph3D() {
       group.add(new THREE.Mesh(getSphereGeo(radius * 1.8, true), glowMat));
     }
 
-    // Always show labels for level-0 seeds; level-1 categories also labelled
     if (node.level <= 1) {
       const sprite = new SpriteText(node.name);
       sprite.color = '#ffffff';
@@ -177,7 +172,6 @@ export default function Graph3D() {
       nodeThreeObjectExtend={false}
       nodeLabel={(node) => (node as GraphNode).name}
       onNodeClick={handleNodeClick}
-      // Physics off — all positions are pinned explicitly
       warmupTicks={0}
       cooldownTicks={0}
       linkColor={() => '#ffffff'}

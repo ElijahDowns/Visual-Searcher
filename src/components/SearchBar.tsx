@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
 import { searchWikipedia, fetchPageSummary } from '../services/wikipedia';
 import { useGraphStore } from '../store/graphStore';
+import { fibonacciSphere } from '../utils/layout';
+import { SEED_COUNT, SEED_RADIUS } from '../App';
 import type { GraphNode } from '../types/graph';
 
 export default function SearchBar() {
@@ -8,7 +10,7 @@ export default function SearchBar() {
   const [results, setResults] = useState<Array<{ title: string; description: string }>>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const { addNodes, setSelectedNode, setSidebarOpen, setSelectedSummary, setFlyToId } = useGraphStore();
+  const { addNodes, nodes, setSelectedNode, setSidebarOpen, setSelectedSummary, setFlyToId } = useGraphStore();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -24,6 +26,13 @@ export default function SearchBar() {
   };
 
   const handleSelect = (title: string) => {
+    // Place search result at the next free slot on the seed sphere,
+    // after all existing level-0 nodes so it never overlaps seeds.
+    const existingLevel0 = nodes.filter(n => n.level === 0).length;
+    const slot = existingLevel0;
+    // Generate positions for seed + search nodes together so they don't collide
+    const pos = fibonacciSphere(slot + 1, SEED_RADIUS)[slot];
+
     const newNode: GraphNode = {
       id: title,
       name: title,
@@ -31,21 +40,21 @@ export default function SearchBar() {
       level: 0,
       val: 4,
       expanded: false,
+      x: pos.x, y: pos.y, z: pos.z,
+      fx: pos.x, fy: pos.y, fz: pos.z,
     };
 
     addNodes([newNode], []);
-
-    // Open sidebar immediately
     setSelectedSummary(null);
     setSelectedNode(newNode);
     setSidebarOpen(true);
 
-    // Fetch Wikipedia summary for the sidebar
+    // Fetch Wikipedia summary for sidebar
     fetchPageSummary(title)
-      .then(summary => setSelectedSummary(summary))
+      .then(s => setSelectedSummary(s))
       .catch(() => setSelectedSummary(null));
 
-    // Tell Graph3D to fly to this node once physics places it
+    // Fly to the node — position is already known so delay can be very short
     setFlyToId(title);
 
     setQuery('');
@@ -117,12 +126,8 @@ export default function SearchBar() {
               </div>
               {r.description && (
                 <div style={{
-                  fontSize: '10px',
-                  opacity: 0.4,
-                  marginTop: '3px',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
+                  fontSize: '10px', opacity: 0.4, marginTop: '3px',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                   letterSpacing: '0.05em',
                 }}>
                   {r.description}
