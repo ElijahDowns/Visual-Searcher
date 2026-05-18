@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { searchWikipedia, fetchPageSummary } from '../services/wikipedia';
 import { useGraphStore } from '../store/graphStore';
 import { fibonacciSphere } from '../utils/layout';
-import { SEED_COUNT, SEED_RADIUS } from '../App';
+import { SEED_RADIUS } from '../App';
 import type { GraphNode } from '../types/graph';
 
 export default function SearchBar() {
