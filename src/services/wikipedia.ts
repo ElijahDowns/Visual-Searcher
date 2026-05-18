@@ -78,6 +78,34 @@ export async function fetchArticleLinks(
 export async function fetchPageSummary(title: string): Promise<WikiSummary> {
   const encoded = encodeURIComponent(title.replace(/ /g, '_'));
   const res = await fetch(`${REST_BASE}/page/summary/${encoded}`);
-  if (!res.ok) throw new Error(`Failed to fetch summary for "${title}"`);
+  if (!res.ok) throw new Error(`No summary for "${title}"`);
   return res.json();
+}
+
+// Fallback when the REST summary endpoint returns 404 — uses the action API extracts
+export async function fetchPageExtract(title: string): Promise<WikiSummary | null> {
+  const url = buildUrl({
+    action: 'query',
+    prop: 'extracts|info',
+    exintro: '1',
+    exsentences: '5',
+    explaintext: '1',
+    inprop: 'url',
+    titles: title,
+  });
+  const res = await fetch(url);
+  const data = await res.json();
+  const pages = Object.values(data.query?.pages ?? {}) as Array<{
+    pageid?: number;
+    title?: string;
+    extract?: string;
+    fullurl?: string;
+  }>;
+  const page = pages[0];
+  if (!page || page.pageid === -1 || !page.extract) return null;
+  return {
+    title: page.title ?? title,
+    extract: page.extract,
+    content_urls: page.fullurl ? { desktop: { page: page.fullurl } } : undefined,
+  };
 }

@@ -1,8 +1,8 @@
 import { useGraphStore } from '../store/graphStore';
 
 export default function Sidebar() {
-  const { isSidebarOpen, selectedNode, selectedSummary, setSidebarOpen,
-          setSelectedNode, setSelectedSummary } = useGraphStore();
+  const { isSidebarOpen, selectedNode, selectedSummary, summaryError,
+          setSidebarOpen, setSelectedNode, setSelectedSummary } = useGraphStore();
 
   const handleClose = () => {
     setSidebarOpen(false);
@@ -80,9 +80,15 @@ export default function Sidebar() {
         </>
       )}
 
-      {!selectedSummary && selectedNode && (
+      {!selectedSummary && selectedNode && !summaryError && (
         <div style={{ opacity: 0.4, fontSize: '12px', letterSpacing: '0.1em' }}>
           LOADING...
+        </div>
+      )}
+
+      {summaryError && selectedNode && (
+        <div style={{ opacity: 0.35, fontSize: '12px', letterSpacing: '0.1em' }}>
+          DESCRIPTION UNAVAILABLE
         </div>
       )}
 

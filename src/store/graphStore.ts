@@ -7,6 +7,7 @@ interface GraphState {
   loadedIds: Set<string>;
   selectedNode: GraphNode | null;
   selectedSummary: WikiSummary | null;
+  summaryError: boolean;
   isLoading: boolean;
   isSidebarOpen: boolean;
   flyToId: string | null;
@@ -14,6 +15,7 @@ interface GraphState {
   addNodes: (newNodes: GraphNode[], newLinks: GraphLink[]) => void;
   setSelectedNode: (node: GraphNode | null) => void;
   setSelectedSummary: (summary: WikiSummary | null) => void;
+  setSummaryError: (err: boolean) => void;
   setLoading: (loading: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   markExpanded: (id: string) => void;
@@ -26,6 +28,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   loadedIds: new Set(),
   selectedNode: null,
   selectedSummary: null,
+  summaryError: false,
   isLoading: false,
   isSidebarOpen: false,
   flyToId: null,
@@ -43,7 +46,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   setSelectedNode: (node) => set({ selectedNode: node }),
-  setSelectedSummary: (summary) => set({ selectedSummary: summary }),
+  setSelectedSummary: (summary) => set({ selectedSummary: summary, summaryError: false }),
+  setSummaryError: (err) => set({ summaryError: err, selectedSummary: null }),
   setLoading: (loading) => set({ isLoading: loading }),
   setSidebarOpen: (open) => set({ isSidebarOpen: open }),
   setFlyToId: (id) => set({ flyToId: id }),

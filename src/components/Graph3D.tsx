@@ -3,9 +3,10 @@ import { useRef, useMemo, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
 import SpriteText from 'three-spritetext';
 import { useGraphStore } from '../store/graphStore';
-import { fetchCategoryMembers, fetchArticleLinks, fetchPageSummary } from '../services/wikipedia';
+import { fetchCategoryMembers, fetchArticleLinks } from '../services/wikipedia';
 import type { GraphNode, GraphLink } from '../types/graph';
 import { childDiskPositions, clusterCamera } from '../utils/layout';
+import { fetchSummaryWithFallback } from '../utils/fetchSummary';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FGRef = any;
@@ -42,7 +43,7 @@ export default function Graph3D() {
 
   const {
     nodes, links,
-    addNodes, setSelectedNode, setSelectedSummary,
+    addNodes, setSelectedNode, setSelectedSummary, setSummaryError,
     setSidebarOpen, markExpanded,
     flyToId, setFlyToId,
   } = useGraphStore();
@@ -64,19 +65,19 @@ export default function Graph3D() {
   // Fly to a search result's cluster after children have been added and rendered
   useEffect(() => {
     if (!flyToId) return;
+    const target = nodes.find(nd => nd.id === flyToId);
     const t = setTimeout(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const n = graphRef.current?.graphData()?.nodes?.find((nd: any) => nd.id === flyToId);
       setFlyToId(null);
-      if (!n) return;
-      const x = n.fx ?? n.x ?? 0, y = n.fy ?? n.y ?? 0, z = n.fz ?? n.z ?? 0;
-      // Always fly to cluster view — if expanded children exist they'll be visible,
-      // otherwise the single node will be centred
+      if (!target) return;
+      const x = target.fx ?? target.x ?? 0;
+      const y = target.fy ?? target.y ?? 0;
+      const z = target.fz ?? target.z ?? 0;
       const spread = spreadForLevel(0);
       const { pos, lookAt } = clusterCamera(x, y, z, spread, 3.2);
       graphRef.current?.cameraPosition(pos, lookAt, 900);
-    }, 250); // wait for React to re-render with children in the graph
+    }, 250);
     return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyToId, setFlyToId]);
 
   const handleNodeClick = useCallback(async (rawNode: object) => {
@@ -96,9 +97,9 @@ export default function Graph3D() {
     setSelectedNode(node);
     setSelectedSummary(null);
     setSidebarOpen(true);
-    fetchPageSummary(node.id.replace(/^Category:/, ''))
-      .then(s => setSelectedSummary(s))
-      .catch(() => setSelectedSummary(null));
+    fetchSummaryWithFallback(node.id)
+      .then(s => s ? setSelectedSummary(s) : setSummaryError(true))
+      .catch(() => setSummaryError(true));
 
     if (!node.expanded) {
       markExpanded(node.id);

@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
-import { searchWikipedia, fetchPageSummary, fetchArticleLinks } from '../services/wikipedia';
+import { searchWikipedia, fetchArticleLinks } from '../services/wikipedia';
+import { fetchSummaryWithFallback } from '../utils/fetchSummary';
 import { useGraphStore } from '../store/graphStore';
 import { fibonacciSphere, childDiskPositions } from '../utils/layout';
 import { SEED_RADIUS } from '../App';
@@ -12,7 +13,7 @@ export default function SearchBar() {
   const [isFocused, setIsFocused] = useState(false);
   const {
     addNodes, nodes, markExpanded,
-    setSelectedNode, setSidebarOpen, setSelectedSummary, setFlyToId,
+    setSelectedNode, setSidebarOpen, setSelectedSummary, setSummaryError, setFlyToId,
   } = useGraphStore();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -50,9 +51,9 @@ export default function SearchBar() {
     setSidebarOpen(true);
 
     // Fetch sidebar summary in parallel — don't block expansion
-    fetchPageSummary(title)
-      .then(s => setSelectedSummary(s))
-      .catch(() => setSelectedSummary(null));
+    fetchSummaryWithFallback(title)
+      .then(s => s ? setSelectedSummary(s) : setSummaryError(true))
+      .catch(() => setSummaryError(true));
 
     // Auto-expand: fetch related articles and pin them around the search node
     try {
