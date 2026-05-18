@@ -61,7 +61,7 @@ export default function Graph3D() {
     }
   }, [nodes.length]);
 
-  // Fly to a search result — position is pinned so we can fly immediately
+  // Fly to a search result's cluster after children have been added and rendered
   useEffect(() => {
     if (!flyToId) return;
     const t = setTimeout(() => {
@@ -70,13 +70,12 @@ export default function Graph3D() {
       setFlyToId(null);
       if (!n) return;
       const x = n.fx ?? n.x ?? 0, y = n.fy ?? n.y ?? 0, z = n.fz ?? n.z ?? 0;
-      const mag = Math.hypot(x, y, z) || 1;
-      graphRef.current?.cameraPosition(
-        { x: x * (1 + 160 / mag), y: y * (1 + 160 / mag), z: z * (1 + 160 / mag) },
-        { x, y, z },
-        800
-      );
-    }, 80); // short: pinned positions are known immediately
+      // Always fly to cluster view — if expanded children exist they'll be visible,
+      // otherwise the single node will be centred
+      const spread = spreadForLevel(0);
+      const { pos, lookAt } = clusterCamera(x, y, z, spread, 3.2);
+      graphRef.current?.cameraPosition(pos, lookAt, 900);
+    }, 250); // wait for React to re-render with children in the graph
     return () => clearTimeout(t);
   }, [flyToId, setFlyToId]);
 
