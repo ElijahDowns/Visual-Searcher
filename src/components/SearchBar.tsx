@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { searchWikipedia } from '../services/wikipedia';
+import { searchWikipedia, fetchPageSummary } from '../services/wikipedia';
 import { useGraphStore } from '../store/graphStore';
 import type { GraphNode } from '../types/graph';
 
@@ -8,7 +8,7 @@ export default function SearchBar() {
   const [results, setResults] = useState<Array<{ title: string; description: string }>>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const { addNodes, setSelectedNode, setSidebarOpen, setSelectedSummary } = useGraphStore();
+  const { addNodes, setSelectedNode, setSidebarOpen, setSelectedSummary, setFlyToId } = useGraphStore();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -19,7 +19,7 @@ export default function SearchBar() {
     debounceRef.current = setTimeout(async () => {
       const res = await searchWikipedia(val);
       setResults(res);
-      setIsOpen(true);
+      setIsOpen(res.length > 0);
     }, 300);
   };
 
@@ -32,10 +32,22 @@ export default function SearchBar() {
       val: 4,
       expanded: false,
     };
+
     addNodes([newNode], []);
+
+    // Open sidebar immediately
     setSelectedSummary(null);
     setSelectedNode(newNode);
     setSidebarOpen(true);
+
+    // Fetch Wikipedia summary for the sidebar
+    fetchPageSummary(title)
+      .then(summary => setSelectedSummary(summary))
+      .catch(() => setSelectedSummary(null));
+
+    // Tell Graph3D to fly to this node once physics places it
+    setFlyToId(title);
+
     setQuery('');
     setResults([]);
     setIsOpen(false);

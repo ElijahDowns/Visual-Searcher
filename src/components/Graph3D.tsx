@@ -1,10 +1,11 @@
 import ForceGraph3D from 'react-force-graph-3d';
-import { useRef, useMemo, useCallback } from 'react';
+import { useRef, useMemo, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
 import SpriteText from 'three-spritetext';
 import { useGraphStore } from '../store/graphStore';
-import { fetchCategoryMembers, fetchPageSummary } from '../services/wikipedia';
+import { fetchCategoryMembers, fetchArticleLinks, fetchPageSummary } from '../services/wikipedia';
 import type { GraphNode, GraphLink } from '../types/graph';
+import { fibonacciSphere } from '../App';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FGRef = any;
@@ -15,90 +16,150 @@ interface NodeObject extends GraphNode {
   z: number;
 }
 
+const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92 });
+const glowMat = new THREE.MeshBasicMaterial({
+  color: 0xffffff, transparent: true, opacity: 0.06,
+  side: THREE.BackSide, blending: THREE.AdditiveBlending, depthWrite: false,
+});
+
+const geoCache = new Map<string, THREE.SphereGeometry>();
+function getSphereGeo(radius: number, isGlow: boolean): THREE.SphereGeometry {
+  const key = `${radius.toFixed(1)}-${isGlow ? 'g' : 'c'}`;
+  if (!geoCache.has(key)) {
+    const segs = radius > 6 ? 14 : 8;
+    geoCache.set(key, new THREE.SphereGeometry(radius, segs, segs));
+  }
+  return geoCache.get(key)!;
+}
+
+// Spread radius shrinks with depth so children cluster tighter around their parent
+function spreadForLevel(level: number): number {
+  return Math.max(40, 130 - level * 30);
+}
+
 export default function Graph3D() {
   const graphRef = useRef<FGRef>(null);
+  const hasZoomed = useRef(false);
+
   const {
     nodes, links,
     addNodes, setSelectedNode, setSelectedSummary,
     setSidebarOpen, markExpanded,
+    flyToId, setFlyToId,
   } = useGraphStore();
 
-  // Key on length to avoid restarting physics simulation on every state change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const graphData = useMemo(() => ({ nodes, links }), [nodes.length, links.length]);
 
+  // Zoom to fit after first render
+  useEffect(() => {
+    if (nodes.length > 0 && !hasZoomed.current) {
+      const timer = setTimeout(() => {
+        graphRef.current?.zoomToFit(800, 120);
+        hasZoomed.current = true;
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [nodes.length]);
+
+  // Fly to a search result after it's added
+  useEffect(() => {
+    if (!flyToId) return;
+    const timer = setTimeout(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const n = graphRef.current?.graphData()?.nodes?.find((node: any) => node.id === flyToId);
+      setFlyToId(null);
+      if (!n) return;
+      const x = n.x ?? 0, y = n.y ?? 0, z = n.z ?? 0;
+      const mag = Math.hypot(x, y, z) || 1;
+      graphRef.current?.cameraPosition(
+        { x: x * (1 + 160 / mag), y: y * (1 + 160 / mag), z: z * (1 + 160 / mag) },
+        { x, y, z },
+        900
+      );
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [flyToId, setFlyToId]);
+
   const handleNodeClick = useCallback(async (rawNode: object) => {
     const node = rawNode as NodeObject;
-    if (!node.x && node.x !== 0) return;
+    const x = node.x ?? 0, y = node.y ?? 0, z = node.z ?? 0;
+    const mag = Math.hypot(x, y, z) || 1;
 
-    // Fly camera to node
-    const distance = 120;
-    const mag = Math.hypot(node.x, node.y, node.z) || 1;
-    const distRatio = 1 + distance / mag;
+    // Fly close to node
     graphRef.current?.cameraPosition(
-      { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
-      { x: node.x, y: node.y, z: node.z },
-      1200
+      { x: x * (1 + 100 / mag), y: y * (1 + 100 / mag), z: z * (1 + 100 / mag) },
+      { x, y, z },
+      700
     );
 
-    // Open sidebar immediately, then load summary in background
     setSelectedNode(node);
     setSelectedSummary(null);
     setSidebarOpen(true);
-
-    const titleForSummary = node.id.replace(/^Category:/, '');
-    fetchPageSummary(titleForSummary)
-      .then(summary => setSelectedSummary(summary))
+    fetchPageSummary(node.id.replace(/^Category:/, ''))
+      .then(s => setSelectedSummary(s))
       .catch(() => setSelectedSummary(null));
 
-    // Expand category on click
-    if (node.type === 'category' && !node.expanded) {
+    if (!node.expanded) {
       markExpanded(node.id);
-      const members = await fetchCategoryMembers(node.id);
-      const newNodes: GraphNode[] = members.map(m => ({
+
+      let rawMembers: Array<{ title: string; ns: number }> = [];
+      if (node.type === 'category') {
+        rawMembers = await fetchCategoryMembers(node.id);
+      } else {
+        const articleLinks = await fetchArticleLinks(node.id);
+        rawMembers = articleLinks.map(l => ({ title: l.title, ns: 0 }));
+      }
+      if (rawMembers.length === 0) return;
+
+      // Compute pinned positions for children in a sphere around parent
+      const spread = spreadForLevel(node.level);
+      const positions = fibonacciSphere(rawMembers.length, spread);
+
+      const newNodes: GraphNode[] = rawMembers.map((m, i) => ({
         id: m.title,
         name: m.title.replace(/^Category:/, ''),
         type: m.ns === 14 ? 'category' : 'article',
         level: node.level + 1,
         val: m.ns === 14 ? 3 : 1,
         expanded: false,
+        // Pin children relative to parent position
+        x: x + positions[i].x, y: y + positions[i].y, z: z + positions[i].z,
+        fx: x + positions[i].x, fy: y + positions[i].y, fz: z + positions[i].z,
       }));
+
       const newLinks: GraphLink[] = newNodes.map(n => ({
         source: node.id,
         target: n.id,
       }));
+
       addNodes(newNodes, newLinks);
+
+      // Pull camera back to show the expanded cluster
+      const pullDist = spread * 3;
+      graphRef.current?.cameraPosition(
+        { x: x * (1 + pullDist / mag), y: y * (1 + pullDist / mag), z: z * (1 + pullDist / mag) },
+        { x, y, z },
+        900
+      );
     }
   }, [graphRef, setSelectedNode, setSelectedSummary, setSidebarOpen, markExpanded, addNodes]);
 
   const nodeThreeObject = useCallback((rawNode: object) => {
     const node = rawNode as GraphNode;
     const group = new THREE.Group();
-
     const radius = Math.cbrt(node.val ?? 1) * 4;
 
-    // Core sphere
-    const geo = new THREE.SphereGeometry(radius, 16, 16);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92 });
-    group.add(new THREE.Mesh(geo, mat));
+    group.add(new THREE.Mesh(getSphereGeo(radius, false), coreMat));
+    if ((node.val ?? 1) > 1) {
+      group.add(new THREE.Mesh(getSphereGeo(radius * 1.8, true), glowMat));
+    }
 
-    // Glow halo
-    const glowGeo = new THREE.SphereGeometry(radius * 1.8, 16, 16);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.06,
-      side: THREE.BackSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    group.add(new THREE.Mesh(glowGeo, glowMat));
-
-    // Text label for top-level and first-child categories
+    // Always show labels for level-0 seeds; level-1 categories also labelled
     if (node.level <= 1) {
       const sprite = new SpriteText(node.name);
       sprite.color = '#ffffff';
-      sprite.textHeight = node.level === 0 ? 5 : 3.5;
+      sprite.textHeight = node.level === 0 ? 5 : 3;
       sprite.fontFace = 'Space Mono, monospace';
       sprite.backgroundColor = 'transparent';
       sprite.position.y = radius + 5;
@@ -116,9 +177,15 @@ export default function Graph3D() {
       nodeThreeObjectExtend={false}
       nodeLabel={(node) => (node as GraphNode).name}
       onNodeClick={handleNodeClick}
-      linkColor={() => 'rgba(255,255,255,0.12)'}
-      linkWidth={0.4}
-      linkOpacity={1}
+      // Physics off — all positions are pinned explicitly
+      warmupTicks={0}
+      cooldownTicks={0}
+      linkColor={() => '#ffffff'}
+      linkOpacity={0.15}
+      linkWidth={0.5}
+      linkDirectionalParticles={1}
+      linkDirectionalParticleSpeed={0.004}
+      linkDirectionalParticleWidth={1.2}
       backgroundColor="#000000"
       showNavInfo={false}
     />

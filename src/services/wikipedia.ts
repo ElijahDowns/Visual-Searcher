@@ -59,6 +59,22 @@ export async function searchWikipedia(
   }));
 }
 
+export async function fetchArticleLinks(
+  title: string
+): Promise<Array<{ title: string }>> {
+  const url = buildUrl({
+    action: 'query',
+    prop: 'links',
+    titles: title,
+    pllimit: '15',
+    plnamespace: '0', // articles only, skip categories/files
+  });
+  const res = await fetch(url);
+  const data = await res.json();
+  const pages = Object.values(data.query?.pages ?? {}) as Array<{ links?: Array<{ title: string }> }>;
+  return pages[0]?.links ?? [];
+}
+
 export async function fetchPageSummary(title: string): Promise<WikiSummary> {
   const encoded = encodeURIComponent(title.replace(/ /g, '_'));
   const res = await fetch(`${REST_BASE}/page/summary/${encoded}`);
